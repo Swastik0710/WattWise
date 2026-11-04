@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 @st.cache_resource
 def load_model():
-    model_path = BASE_DIR / "models" / "random_forest_model.pkl"
+    model_path = BASE_DIR / "models" / "random_forest_model.pkl.gz"
     features_path = BASE_DIR / "models" / "model_features.pkl"
 
     if not model_path.exists():
