@@ -35,11 +35,10 @@ model, model_features = load_model()
 @st.cache_data(show_spinner="Preparing household electricity data...")
 def load_energy_data():
 
-    df = pd.read_csv(
-        "dataset/household_power_consumption.txt",
-        sep=";",
-        na_values=["?"],
-        low_memory=False
+    ml_df = pd.read_csv(
+        "dataset/processed_hourly_data.csv",
+        index_col=0,
+        parse_dates=True
     )
 
     df["Global_active_power"] = pd.to_numeric(
