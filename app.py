@@ -65,6 +65,15 @@ def load_energy_data():
     )
     ml_df.index = pd.to_datetime(ml_df.index)
 
+    ml_df["hour_sin"] = np.sin(2 * np.pi * ml_df["hour"] / 24)
+    ml_df["hour_cos"] = np.cos(2 * np.pi * ml_df["hour"] / 24)
+    
+    ml_df["day_sin"] = np.sin(2 * np.pi * ml_df["day_of_week"] / 7)
+    ml_df["day_cos"] = np.cos(2 * np.pi * ml_df["day_of_week"] / 7)
+    
+    ml_df["month_sin"] = np.sin(2 * np.pi * (ml_df["month"] - 1) / 12)
+    ml_df["month_cos"] = np.cos(2 * np.pi * (ml_df["month"] - 1) / 12)
+    
     required_columns = [
         "energy_kwh", "hour", "day_of_week", "month", "is_weekend",
         "previous_hour", "previous_day", "rolling_mean_24",
