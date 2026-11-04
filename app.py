@@ -22,7 +22,7 @@ st.set_page_config(
 
 @st.cache_resource
 def load_model():
-    model = joblib.load("models/random_forest_model.pkl")
+    model = joblib.load("models/random_forest_model.pkl.gz")
     features = joblib.load("models/model_features.pkl")
     return model, features
 
