@@ -17,116 +17,95 @@ st.set_page_config(
 )
 
 # =========================================
-# LOAD MODEL
+# LOAD MODEL AND PROCESSED DATA
 # =========================================
+
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+
 
 @st.cache_resource
 def load_model():
-    model = joblib.load("models/random_forest_model.pkl.gz")
-    features = joblib.load("models/model_features.pkl")
-    return model, features
+    model_path = BASE_DIR / "models" / "random_forest_model.pkl"
+    features_path = BASE_DIR / "models" / "model_features.pkl"
 
-model, model_features = load_model()
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Model file not found: {model_path}. "
+            "Make sure models/random_forest_model.pkl is committed to GitHub."
+        )
+    if not features_path.exists():
+        raise FileNotFoundError(
+            f"Feature file not found: {features_path}. "
+            "Make sure models/model_features.pkl is committed to GitHub."
+        )
 
-# =========================================
-# LOAD AND PREPARE REAL DATASET
-# =========================================
+    model = joblib.load(model_path)
+    model_features = joblib.load(features_path)
+    return model, model_features
 
-@st.cache_data(show_spinner="Preparing household electricity data...")
+
+@st.cache_data(show_spinner="Loading processed household electricity data...")
 def load_energy_data():
+    data_path = BASE_DIR / "dataset" / "processed_hourly_data.csv"
 
+    if not data_path.exists():
+        raise FileNotFoundError(
+            f"Processed dataset not found: {data_path}. "
+            "Make sure dataset/processed_hourly_data.csv is committed to GitHub."
+        )
+
+    # This CSV already contains hourly energy values and engineered features.
+    # Do not repeat raw-data cleaning, resampling, or feature engineering here.
     ml_df = pd.read_csv(
-        "dataset/processed_hourly_data.csv",
+        data_path,
         index_col=0,
         parse_dates=True
     )
+    ml_df.index = pd.to_datetime(ml_df.index)
 
-    df["Global_active_power"] = pd.to_numeric(
-        df["Global_active_power"], errors="coerce"
-    )
+    required_columns = [
+        "energy_kwh", "hour", "day_of_week", "month", "is_weekend",
+        "previous_hour", "previous_day", "rolling_mean_24",
+        "hour_sin", "hour_cos", "day_sin", "day_cos",
+        "month_sin", "month_cos"
+    ]
+    missing_columns = [col for col in required_columns if col not in ml_df.columns]
+    if missing_columns:
+        raise ValueError(
+            "The processed dataset is missing required columns: "
+            + ", ".join(missing_columns)
+            + ". Re-create processed_hourly_data.csv from the final ml_df in your notebook."
+        )
 
-    df["datetime"] = pd.to_datetime(
-        df["Date"] + " " + df["Time"],
-        format="%d/%m/%Y %H:%M:%S",
-        errors="coerce"
-    )
-
-    df = df.dropna(subset=["datetime"])
-
-    minute_data = (
-        df[["datetime", "Global_active_power"]]
-        .set_index("datetime")
-        .sort_index()
-    )
-
-    hourly_power = minute_data["Global_active_power"].resample("h").mean()
-    hourly_count = minute_data["Global_active_power"].resample("h").count()
-
-    hourly_power = hourly_power.where(hourly_count >= 45)
-
-    hourly_df = pd.DataFrame({
-        "energy_kwh": hourly_power
-    })
-
-    hourly_df["hour"] = hourly_df.index.hour
-    hourly_df["day_of_week"] = hourly_df.index.dayofweek
-    hourly_df["month"] = hourly_df.index.month
-    hourly_df["is_weekend"] = (
-        hourly_df["day_of_week"] >= 5
-    ).astype(int)
-
-    hourly_df["previous_hour"] = hourly_df["energy_kwh"].shift(1)
-    hourly_df["previous_day"] = hourly_df["energy_kwh"].shift(24)
-
-    hourly_df["rolling_mean_24"] = (
-        hourly_df["energy_kwh"]
-        .shift(1)
-        .rolling(window=24)
-        .mean()
-    )
-
-    hourly_df["hour_sin"] = np.sin(
-        2 * np.pi * hourly_df["hour"] / 24
-    )
-    hourly_df["hour_cos"] = np.cos(
-        2 * np.pi * hourly_df["hour"] / 24
-    )
-
-    hourly_df["day_sin"] = np.sin(
-        2 * np.pi * hourly_df["day_of_week"] / 7
-    )
-    hourly_df["day_cos"] = np.cos(
-        2 * np.pi * hourly_df["day_of_week"] / 7
-    )
-
-    hourly_df["month_sin"] = np.sin(
-        2 * np.pi * hourly_df["month"] / 12
-    )
-    hourly_df["month_cos"] = np.cos(
-        2 * np.pi * hourly_df["month"] / 12
-    )
-
-    ml_df = hourly_df.dropna().copy()
-
+    # The exported file is the cleaned feature dataset (ml_df), so it is also
+    # used as the available hourly history for the dashboard charts.
+    hourly_df = ml_df.copy()
     return hourly_df, ml_df
 
 
+# Load the saved model, feature names, and processed data.
+model, model_features = load_model()
 hourly_df, ml_df = load_energy_data()
 
-# Recreate the chronological test set
+# Recreate the same chronological 80/20 test split used during model training.
+missing_model_features = [col for col in model_features if col not in ml_df.columns]
+if missing_model_features:
+    raise ValueError(
+        "The processed dataset does not contain model features: "
+        + ", ".join(missing_model_features)
+    )
+
 X_all = ml_df[model_features]
 y_all = ml_df["energy_kwh"]
-
 split_index = int(len(ml_df) * 0.8)
-
 X_test_graph = X_all.iloc[split_index:]
 y_test_graph = y_all.iloc[split_index:]
 
-# Predictions for the held-out test period
+# Predictions for the held-out test period and their residuals.
 y_pred_graph = model.predict(X_test_graph)
-
-# Residuals: actual minus predicted
-residuals = y_test_graph.values - y_pred_graph
+residuals = y_test_graph.to_numpy() - y_pred_graph
 
 # =========================================
 # CUSTOM DESIGN
